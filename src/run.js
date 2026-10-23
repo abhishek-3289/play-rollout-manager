@@ -7,6 +7,7 @@ import { checkCrashRate } from './crash.js';
 import { applyDecision, decide, formatPercent, haltDecision, roundPercent, selectRelease } from './rollout.js';
 import { formatSlackMessage, postSlack, shouldNotify } from './slack.js';
 import { renderSummary } from './summary.js';
+import { DAY_NAMES, weekdayIn } from './schedule.js';
 
 function runUrl(env) {
   if (!env.GITHUB_SERVER_URL || !env.GITHUB_REPOSITORY || !env.GITHUB_RUN_ID) return '';
@@ -33,6 +34,17 @@ async function guardAdvance({ inputs, release, decision, fetchImpl, token, histo
       return { action: 'skipped', toStatus: release.status, toPercent: release.percent, reason: `crash guard: ${crash.reason}; not advancing`, changes: false };
     }
     notes.push(`Crash guard: ${crash.reason}`);
+  }
+
+  const today = weekdayIn(now(), inputs.timeZone);
+  if (!inputs.allowedDays.has(today)) {
+    return {
+      action: 'skipped',
+      toStatus: release.status,
+      toPercent: release.percent,
+      reason: `today is ${DAY_NAMES[today]} in ${inputs.timeZone}; allowed-days is ${inputs.allowedDaysText}`,
+      changes: false,
+    };
   }
 
   if (inputs.minHoursBetweenSteps > 0) {

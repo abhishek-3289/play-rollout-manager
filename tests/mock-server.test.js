@@ -23,6 +23,7 @@ function env(base, inputs) {
     'api-base-url': base,
     'token-url-override': `${base}/token`,
     'github-api-url': base,
+    'allowed-days': 'all',
     ...inputs,
   });
 }

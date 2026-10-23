@@ -74,6 +74,9 @@ When a release becomes `completed`, any older `completed` release on the same tr
 - Only `resume` un-halts a release. `set` and `complete` on a halted release are skipped with `run resume first`.
 - `advance` skips when the last rollout increase for this package and track happened less than
   `min-hours-between-steps` hours ago (see *Where state lives* below).
+- `advance` only increases the rollout on `allowed-days` (default Monday to Friday) in `timezone` (default `UTC`).
+  On other days it reports `skipped: today is Saturday in UTC; allowed-days is mon-fri`. The crash guard still
+  halts on any day, and `set`, `halt`, `resume`, `complete` and `status` always run.
 - `set` never lowers the rollout percentage.
 - `status` and `dry-run` never change anything in Google Play and never create deployments.
 - If the GitHub Deployments API fails, the rollout still proceeds with a warning, unless `require-history: true`.
@@ -91,6 +94,8 @@ When a release becomes `completed`, any older `completed` release on the same tr
 | steps                       | Comma separated rollout percentages used by `advance`. Values must be greater than 0 and at most 100.                         | No       | `10,25,50,100`          |
 | percentage                  | Target percentage for `set` (1-100, `100` completes the rollout).                                                              | No       | ❌                      |
 | min-hours-between-steps     | `advance` skips when the last recorded increase is newer than this many hours. `0` disables the check.                         | No       | `20`                    |
+| allowed-days                | Days on which `advance` may increase the rollout: names (`mon`, `Monday`), ranges (`mon-fri`, wrap-around `fri-mon`), lists (`mon,wed,fri`) or `all`. | No       | `mon-fri`               |
+| timezone                    | IANA time zone used to decide today's day for `allowed-days`, e.g. `UTC`, `Europe/London`, `Asia/Kolkata`.                     | No       | `UTC`                   |
 | max-crash-rate              | **Experimental.** Crash rate in percent (e.g. `1.5`). When set, `advance` halts the release if its crash rate is higher.        | No       | ❌                      |
 | changes-not-sent-for-review | Sends `changesNotSentForReview=true` with the edit commit.                                                                     | No       | `false`                 |
 | dry-run                     | Compute and report the decision only. The edit is deleted, nothing is recorded.                                               | No       | `false`                 |
@@ -159,6 +164,21 @@ gh workflow run auto-rollout.yml -f command=set -f percentage=20
 gh workflow run auto-rollout.yml -f command=halt
 gh workflow run auto-rollout.yml -f command=advance -f dry-run=true
 ```
+
+### Weekdays only 📅
+
+`advance` only increases the rollout on `allowed-days`, which defaults to `mon-fri`, so nothing rolls further over
+a weekend even if the workflow is scheduled daily or someone runs `advance` by hand on a Saturday. The day is
+taken in `timezone` (default `UTC`); set it to your team's zone so "Friday" means your Friday:
+
+```yaml
+          allowed-days: mon-thu
+          timezone: Europe/London
+```
+
+Use `allowed-days: all` to allow every day. Days outside the list are reported as `skipped` (sent to Slack only
+with `notify-on-skip: true`). The crash guard still halts a bad release on any day, and the manual `set`, `halt`,
+`resume`, `complete` and `status` commands are never blocked.
 
 Halting a release in Play Console works too: the next scheduled run reads the real status from Play and skips the
 halted release until someone runs `resume`.
