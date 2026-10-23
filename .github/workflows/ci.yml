@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: ShellCheck
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -r shellcheck
+
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color .github/workflows/*.yml examples/*.yml
+
+      - name: Syntax check
+        run: |
+          for file in src/*.js tests/*.js; do
+            node --check "$file"
+          done
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Run tests
+        run: npm test
+
+  integration:
+    name: Integration (dry run against a mock Play API)
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Start mock server
+        run: |
+          MOCK_PORT=8787 nohup node tests/mock-server.js > mock-server.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8787/__requests > /dev/null && exit 0
+            sleep 1
+          done
+          cat mock-server.log
+          echo "::error::mock server did not start"
+          exit 1
+
+      - name: Generate throwaway service account key
+        id: key
+        run: |
+          node -e '
+            const { generateKeyPairSync } = require("node:crypto");
+            const { privateKey } = generateKeyPairSync("rsa", {
+              modulusLength: 2048,
+              publicKeyEncoding: { type: "spki", format: "pem" },
+              privateKeyEncoding: { type: "pkcs8", format: "pem" },
+            });
+            const json = JSON.stringify({
+              type: "service_account",
+              client_email: "ci@example-project.iam.gserviceaccount.com",
+              private_key: privateKey,
+              token_uri: "http://127.0.0.1:8787/token",
+            });
+            require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "json=" + json + "\n");
+          '
+
+      - name: Run action
+        id: rollout
+        uses: ./
+        with:
+          package-name: com.example.app
+          service-account-json: ${{ steps.key.outputs.json }}
+          dry-run: true
+          github-token: mock-github-token
+          api-base-url: http://127.0.0.1:8787
+          token-url-override: http://127.0.0.1:8787/token
+          github-api-url: http://127.0.0.1:8787
+
+      - name: Verify outputs and requests
+        env:
+          VERSION_NAME: ${{ steps.rollout.outputs.version-name }}
+          VERSION_CODES: ${{ steps.rollout.outputs.version-codes }}
+          STATUS: ${{ steps.rollout.outputs.status }}
+          PREVIOUS: ${{ steps.rollout.outputs.previous-percentage }}
+          PERCENTAGE: ${{ steps.rollout.outputs.percentage }}
+          ACTION_TAKEN: ${{ steps.rollout.outputs.action-taken }}
+          REASON: ${{ steps.rollout.outputs.reason }}
+        run: |
+          [[ $VERSION_NAME == 1.2.3 ]] || { echo "::error::unexpected version-name '$VERSION_NAME'"; exit 1; }
+          [[ $VERSION_CODES == 123 ]] || { echo "::error::unexpected version-codes '$VERSION_CODES'"; exit 1; }
+          [[ $STATUS == inProgress ]] || { echo "::error::unexpected status '$STATUS'"; exit 1; }
+          [[ $PREVIOUS == 25 && $PERCENTAGE == 50 ]] || { echo "::error::unexpected percentages '$PREVIOUS' -> '$PERCENTAGE'"; exit 1; }
+          [[ $ACTION_TAKEN == advanced ]] || { echo "::error::unexpected action-taken '$ACTION_TAKEN'"; exit 1; }
+          [[ $REASON == "dry run, not applied: advanced from 25% to 50%" ]] || { echo "::error::unexpected reason '$REASON'"; exit 1; }
+          curl -sf http://127.0.0.1:8787/__requests > requests.json
+          jq -r '.[] | "\(.method) \(.path)"' requests.json
+          jq -e '[.[] | select(.method == "PUT" or (.path | endswith(":commit")) or (.method == "POST" and (.path | contains("deployments"))))] | length == 0' requests.json > /dev/null || { echo "::error::dry run wrote to the mock API"; exit 1; }
+          jq -e '[.[] | select(.method == "DELETE" and (.path | endswith("/edits/mock-edit")))] | length == 1' requests.json > /dev/null || { echo "::error::edit was not deleted"; exit 1; }
+
+      - name: Mock server log
+        if: failure()
+        run: cat mock-server.log

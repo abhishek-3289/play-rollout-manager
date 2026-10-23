@@ -1,0 +1,103 @@
+name: Play Rollout Manager
+description: Advance, halt, resume or complete a Google Play staged rollout, using Google Play as the source of truth
+author: Abhishek Bansal
+
+branding:
+  icon: trending-up
+  color: green
+
+inputs:
+  package-name:
+    description: Application package name, e.g. com.example.app
+    required: true
+  service-account-json:
+    description: Contents of the Google Cloud service account JSON key with access to the app in Play Console
+    required: true
+  track:
+    description: Play track holding the staged release
+    required: false
+    default: production
+  command:
+    description: One of advance, set, halt, resume, complete, status
+    required: false
+    default: advance
+  steps:
+    description: Comma separated rollout percentages used by advance
+    required: false
+    default: '10,25,50,100'
+  percentage:
+    description: Target percentage for the set command (1-100, 100 completes the rollout)
+    required: false
+    default: ''
+  min-hours-between-steps:
+    description: advance skips when the last rollout increase recorded in deployments is newer than this many hours; 0 disables the check
+    required: false
+    default: '20'
+  max-crash-rate:
+    description: Experimental. Crash rate percentage (e.g. 1.5) above which advance halts the release instead
+    required: false
+    default: ''
+  changes-not-sent-for-review:
+    description: Pass changesNotSentForReview=true when committing the edit
+    required: false
+    default: 'false'
+  dry-run:
+    description: Compute and report the decision without changing Google Play or recording history
+    required: false
+    default: 'false'
+  github-token:
+    description: Token used to read and create GitHub deployments (needs deployments write)
+    required: false
+    default: ${{ github.token }}
+  deployment-environment:
+    description: GitHub environment used for rollout history; defaults to play-<track>-rollout
+    required: false
+    default: ''
+  require-history:
+    description: Fail instead of warning when GitHub deployments cannot be read or written
+    required: false
+    default: 'false'
+  slack-webhook-url:
+    description: Slack incoming webhook URL for notifications
+    required: false
+    default: ''
+  notify-on-skip:
+    description: Also notify Slack when advance skips
+    required: false
+    default: 'false'
+  notify-on-dry-run:
+    description: Send Slack notifications in dry-run mode
+    required: false
+    default: 'false'
+  api-base-url:
+    description: For testing only. Overrides the Google Play and Play Developer Reporting API host
+    required: false
+    default: ''
+  token-url-override:
+    description: For testing only. Overrides the OAuth token endpoint
+    required: false
+    default: ''
+  github-api-url:
+    description: For testing only. Overrides the GitHub REST API URL
+    required: false
+    default: ''
+
+outputs:
+  version-name:
+    description: Name of the release on the track
+  version-codes:
+    description: Comma separated version codes of the release
+  status:
+    description: Release status after the run (inProgress, halted or completed)
+  previous-percentage:
+    description: Rollout percentage before the run
+  percentage:
+    description: Rollout percentage after the run
+  action-taken:
+    description: One of advanced, set, halted, resumed, completed, skipped, none
+  reason:
+    description: Human readable explanation of the decision
+
+runs:
+  using: node24
+  main: src/index.js

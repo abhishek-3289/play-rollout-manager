@@ -1,0 +1,58 @@
+name: Play staged rollout
+
+on:
+  schedule:
+    - cron: '0 16 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      command:
+        description: What to do with the current production release
+        type: choice
+        options: [advance, set, halt, resume, complete, status]
+        default: advance
+      percentage:
+        description: Target percentage, only used by set (1-100)
+        required: false
+        default: ''
+      dry-run:
+        description: Report the decision without changing Google Play
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: play-production-rollout
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_ROLLOUT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: play-production-rollout
+    steps:
+      - name: Manage rollout
+        id: rollout
+        uses: abhishek-3289/play-rollout-manager@v1
+        with:
+          package-name: com.example.app
+          service-account-json: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          track: production
+          command: ${{ inputs.command || 'advance' }}
+          percentage: ${{ inputs.percentage }}
+          dry-run: ${{ inputs.dry-run || false }}
+          steps: '10,25,50,100'
+          min-hours-between-steps: 20
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Print result
+        env:
+          VERSION_NAME: ${{ steps.rollout.outputs.version-name }}
+          ACTION_TAKEN: ${{ steps.rollout.outputs.action-taken }}
+          PREVIOUS: ${{ steps.rollout.outputs.previous-percentage }}
+          PERCENTAGE: ${{ steps.rollout.outputs.percentage }}
+          REASON: ${{ steps.rollout.outputs.reason }}
+        run: |
+          echo "$VERSION_NAME $ACTION_TAKEN ($PREVIOUS% -> $PERCENTAGE%): $REASON"

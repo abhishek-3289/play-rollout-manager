@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      increment-type:
+        description: Part of the version to increment
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Tag and publish release
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Calculate next version
+        id: version
+        env:
+          INCREMENT_TYPE: ${{ inputs.increment-type }}
+        run: |
+          if ! git fetch --tags --force --quiet 2>/dev/null; then
+            echo "::warning::Could not fetch tags from remote; using tags available locally"
+          fi
+          LATEST_TAG=$(
+            git tag --list \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+              | awk '{ version = $0; sub(/^v/, "", version); print version " " $0 }' \
+              | sort -t. -k1,1n -k2,2n -k3,3n \
+              | tail -n 1 \
+              | cut -d' ' -f2 \
+              || true
+          )
+          LATEST_TAG=${LATEST_TAG:-v0.0.0}
+          [[ $LATEST_TAG =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+          MAJOR=${BASH_REMATCH[1]}
+          MINOR=${BASH_REMATCH[2]}
+          PATCH=${BASH_REMATCH[3]}
+          case $INCREMENT_TYPE in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::increment-type must be one of major, minor, patch, got '$INCREMENT_TYPE'"; exit 1 ;;
+          esac
+          echo "Latest tag: $LATEST_TAG -> v$MAJOR.$MINOR.$PATCH"
+          {
+            echo "version=$MAJOR.$MINOR.$PATCH"
+            echo "major=$MAJOR"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+
+      - name: Move major version tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MAJOR: ${{ steps.version.outputs.major }}
+        run: |
+          git tag -f "v$MAJOR" "$GITHUB_SHA"
+          git push -f origin "refs/tags/v$MAJOR"
+          echo "Released v$VERSION and moved v$MAJOR" >> "$GITHUB_STEP_SUMMARY"

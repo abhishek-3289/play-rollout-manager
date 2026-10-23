@@ -1,0 +1,43 @@
+name: Halt Play rollout
+
+on:
+  repository_dispatch:
+    types: [halt-rollout]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why the rollout is being halted
+        required: false
+        default: Manual halt
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: play-production-halt
+  cancel-in-progress: false
+
+jobs:
+  halt:
+    runs-on: ubuntu-latest
+    environment: play-production-rollout
+    steps:
+      - name: Halt rollout
+        id: halt
+        uses: abhishek-3289/play-rollout-manager@v1
+        with:
+          package-name: com.example.app
+          service-account-json: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          track: production
+          command: halt
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Summary
+        env:
+          REASON: ${{ github.event.client_payload.reason || inputs.reason }}
+          ACTION_TAKEN: ${{ steps.halt.outputs.action-taken }}
+          VERSION_NAME: ${{ steps.halt.outputs.version-name }}
+          PERCENTAGE: ${{ steps.halt.outputs.percentage }}
+        run: |
+          echo "Halt requested ($REASON): $VERSION_NAME $ACTION_TAKEN at $PERCENTAGE%" >> "$GITHUB_STEP_SUMMARY"
