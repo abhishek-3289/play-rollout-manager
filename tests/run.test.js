@@ -18,10 +18,10 @@ import {
   TOKEN,
 } from './helpers.js';
 
-async function execute({ inputs = {}, extraEnv = {}, play = {}, deployments = {}, slackStatus = 200, extraRoutes = [] } = {}) {
+async function execute({ inputs = {}, extraEnv = {}, play = {}, deployments = {}, slackStatus = 200, extraRoutes = [], now = NOW } = {}) {
   const { fetchImpl, calls } = fakeFetch([...extraRoutes, ...playRoutes(play), ...deploymentRoutes(deployments), ...slackRoutes(slackStatus)]);
   const core = makeCore();
-  const result = await run({ env: makeEnv(inputs, extraEnv), fetchImpl, now: () => NOW, core });
+  const result = await run({ env: makeEnv(inputs, extraEnv), fetchImpl, now: () => now, core });
   return { result, calls, core };
 }
 
@@ -452,4 +452,69 @@ test('crash guard uses the worst rate across multiple version codes', async () =
   assert.equal(result.actionTaken, 'halted');
   assert.match(result.reason, /3% for version code 124/);
   assert.equal(find(calls, 'POST', /:query$/)[0].body.filter, 'versionCode = 123 OR versionCode = 124');
+});
+
+const SATURDAY = new Date('2026-03-14T16:00:00Z');
+
+test('advance skips outside allowed-days without writing or reading history', async () => {
+  const { result, calls, core } = await execute({ now: SATURDAY });
+  assert.equal(result.failed, false);
+  assert.equal(result.actionTaken, 'skipped');
+  assert.equal(result.reason, 'today is Saturday in UTC; allowed-days is mon-fri');
+  assert.equal(core.outputs['action-taken'], 'skipped');
+  assert.equal(core.outputs.percentage, '25');
+  assert.equal(find(calls, 'PUT', /./).length, 0);
+  assert.equal(find(calls, 'POST', /:commit/).length, 0);
+  assert.equal(find(calls, 'GET', /deployments/).length, 0);
+  assert.equal(find(calls, 'DELETE', /edits\/edit-1$/).length, 1);
+});
+
+test('advance is allowed on a weekend day listed in allowed-days', async () => {
+  const { result } = await execute({ now: SATURDAY, inputs: { 'allowed-days': 'mon-sat' } });
+  assert.equal(result.actionTaken, 'advanced');
+});
+
+test('allowed-days all advances every day', async () => {
+  const { result } = await execute({ now: SATURDAY, inputs: { 'allowed-days': 'all' } });
+  assert.equal(result.actionTaken, 'advanced');
+});
+
+test('timezone decides which day it is', async () => {
+  const fridayEveningUtc = new Date('2026-03-13T20:00:00Z');
+  const utc = await execute({ now: fridayEveningUtc });
+  assert.equal(utc.result.actionTaken, 'advanced');
+  const kolkata = await execute({ now: fridayEveningUtc, inputs: { timezone: 'Asia/Kolkata' } });
+  assert.equal(kolkata.result.actionTaken, 'skipped');
+  assert.equal(kolkata.result.reason, 'today is Saturday in Asia/Kolkata; allowed-days is mon-fri');
+});
+
+test('skips outside allowed-days notify Slack only with notify-on-skip', async () => {
+  const quiet = await execute({ now: SATURDAY, inputs: { 'slack-webhook-url': SLACK } });
+  assert.equal(quiet.calls.some((call) => call.url === SLACK), false);
+  const loud = await execute({ now: SATURDAY, inputs: { 'slack-webhook-url': SLACK, 'notify-on-skip': 'true' } });
+  assert.equal(loud.calls.some((call) => call.url === SLACK), true);
+});
+
+test('manual commands work outside allowed-days', async () => {
+  const halt = await execute({ now: SATURDAY, inputs: { command: 'halt' } });
+  assert.equal(halt.result.actionTaken, 'halted');
+  const set = await execute({ now: SATURDAY, inputs: { command: 'set', percentage: '50' } });
+  assert.equal(set.result.actionTaken, 'set');
+  const complete = await execute({ now: SATURDAY, inputs: { command: 'complete' } });
+  assert.equal(complete.result.actionTaken, 'completed');
+  const resume = await execute({ now: SATURDAY, inputs: { command: 'resume' }, play: { releases: [release({ status: 'halted' })] } });
+  assert.equal(resume.result.actionTaken, 'resumed');
+});
+
+test('crash guard still halts outside allowed-days', async () => {
+  const { result, calls } = await execute({ now: SATURDAY, inputs: { 'max-crash-rate': '1.5' }, extraRoutes: crashRoutes({ rate: 0.021 }) });
+  assert.equal(result.actionTaken, 'halted');
+  assert.equal(find(calls, 'PUT', /tracks/)[0].body.releases[0].status, 'halted');
+});
+
+test('a healthy crash guard does not override allowed-days', async () => {
+  const { result, calls } = await execute({ now: SATURDAY, inputs: { 'max-crash-rate': '1.5' }, extraRoutes: crashRoutes({ rate: 0.004 }) });
+  assert.equal(result.actionTaken, 'skipped');
+  assert.match(result.reason, /^today is Saturday/);
+  assert.equal(find(calls, 'PUT', /./).length, 0);
 });

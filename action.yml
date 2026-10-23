@@ -33,6 +33,14 @@ inputs:
     description: advance skips when the last rollout increase recorded in deployments is newer than this many hours; 0 disables the check
     required: false
     default: '20'
+  allowed-days:
+    description: Days on which advance may increase the rollout, e.g. mon-fri, mon,wed,fri, fri-mon or all; other commands and crash-guard halts run any day
+    required: false
+    default: mon-fri
+  timezone:
+    description: IANA time zone used to decide the current day for allowed-days, e.g. UTC or Asia/Kolkata
+    required: false
+    default: UTC
   max-crash-rate:
     description: Experimental. Crash rate percentage (e.g. 1.5) above which advance halts the release instead
     required: false

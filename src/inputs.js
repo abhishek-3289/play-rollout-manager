@@ -1,3 +1,5 @@
+import { isValidTimeZone, parseAllowedDays } from './schedule.js';
+
 export const COMMANDS = ['advance', 'set', 'halt', 'resume', 'complete', 'status'];
 
 export class InputError extends Error {}
@@ -91,6 +93,15 @@ export function readInputs(env) {
     if (maxCrashRate <= 0 || maxCrashRate > 100) throw new InputError(`max-crash-rate must be greater than 0 and at most 100, got '${rawCrashRate}'`);
   }
 
+  const allowedDaysText = getInput(env, 'allowed-days') || 'mon-fri';
+  const allowedDays = parseAllowedDays(allowedDaysText);
+  if (!allowedDays) {
+    throw new InputError(`allowed-days must be day names, ranges or 'all' (for example 'mon-fri' or 'mon,wed,fri'), got '${allowedDaysText}'`);
+  }
+
+  const timeZone = getInput(env, 'timezone') || 'UTC';
+  if (!isValidTimeZone(timeZone)) throw new InputError(`timezone must be an IANA time zone such as 'UTC' or 'Europe/London', got '${timeZone}'`);
+
   return {
     packageName,
     serviceAccount,
@@ -100,6 +111,9 @@ export function readInputs(env) {
     percentage,
     minHoursBetweenSteps,
     maxCrashRate,
+    allowedDays,
+    allowedDaysText,
+    timeZone,
     changesNotSentForReview: parseBoolean(getInput(env, 'changes-not-sent-for-review'), 'changes-not-sent-for-review'),
     dryRun: parseBoolean(getInput(env, 'dry-run'), 'dry-run'),
     githubToken: getInput(env, 'github-token'),

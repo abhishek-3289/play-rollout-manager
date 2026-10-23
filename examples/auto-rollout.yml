@@ -45,6 +45,8 @@ jobs:
           dry-run: ${{ inputs.dry-run || false }}
           steps: '10,25,50,100'
           min-hours-between-steps: 20
+          allowed-days: mon-fri
+          timezone: UTC
           slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 
       - name: Print result

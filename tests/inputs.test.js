@@ -15,6 +15,9 @@ test('readInputs applies defaults', () => {
   assert.deepEqual(inputs.steps, [10, 25, 50, 100]);
   assert.equal(inputs.minHoursBetweenSteps, 20);
   assert.equal(inputs.maxCrashRate, null);
+  assert.deepEqual([...inputs.allowedDays].sort(), [1, 2, 3, 4, 5]);
+  assert.equal(inputs.allowedDaysText, 'mon-fri');
+  assert.equal(inputs.timeZone, 'UTC');
   assert.equal(inputs.dryRun, false);
   assert.equal(inputs.deploymentEnvironment, 'play-production-rollout');
   assert.equal(inputs.playApiBaseUrl, 'https://androidpublisher.googleapis.com');
@@ -51,7 +54,16 @@ test('parseSteps sorts and validates percentages', () => {
   assert.throws(() => parseSteps('25,25,50'), /duplicate/);
 });
 
+test('readInputs reads allowed-days and timezone', () => {
+  const inputs = readInputs(makeEnv({ 'allowed-days': 'sat-sun', timezone: 'Asia/Kolkata' }));
+  assert.deepEqual([...inputs.allowedDays].sort(), [0, 6]);
+  assert.equal(inputs.allowedDaysText, 'sat-sun');
+  assert.equal(inputs.timeZone, 'Asia/Kolkata');
+});
+
 test('readInputs rejects invalid values', () => {
+  assert.throws(() => readInputs(makeEnv({ 'allowed-days': 'weekdays' })), /allowed-days must be day names/);
+  assert.throws(() => readInputs(makeEnv({ timezone: 'Mars/Olympus' })), /timezone must be an IANA time zone/);
   assert.throws(() => readInputs(makeEnv({ 'package-name': '' })), /package-name is required/);
   assert.throws(() => readInputs(makeEnv({ 'package-name': 'not a package' })), /not a valid Android package name/);
   assert.throws(() => readInputs(makeEnv({ 'service-account-json': '' })), /service-account-json is required/);
