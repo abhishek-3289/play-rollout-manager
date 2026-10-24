@@ -14,7 +14,7 @@
     steps:
       - name: Advance staged rollout
         id: rollout
-        uses: abhishek-3289/play-rollout-manager@v1
+        uses: appshipkit/play-rollout-manager@v1
         with:
           package-name: com.example.app
           service-account-json: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
